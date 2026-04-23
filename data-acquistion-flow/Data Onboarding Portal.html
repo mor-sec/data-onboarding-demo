@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Data Onboarding Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; }
+  body { font-family: 'IBM Plex Sans', sans-serif; background: #F3F2F2; color: #032D60; }
+  :root {
+    --blue: #0176D3;
+    --blue-dark: #014486;
+    --blue-light: #D8EDFF;
+    --navy: #032D60;
+    --navy-mid: #1B4F8A;
+    --gray-0: #FFFFFF;
+    --gray-1: #F3F2F2;
+    --gray-2: #E5E5E5;
+    --gray-3: #DDDBDA;
+    --gray-4: #C9C7C5;
+    --gray-5: #706E6B;
+    --gray-6: #444444;
+    --amber: #A86403;
+    --amber-bg: #FEF3E2;
+    --amber-border: #FDD89B;
+    --green: #2E844A;
+    --green-bg: #EEF4EB;
+    --red: #BA0517;
+    --red-bg: #FEF1EE;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,.1);
+    --shadow-md: 0 2px 8px rgba(0,0,0,.12);
+    --radius: 6px;
+  }
+  input, textarea, select {
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+  }
+  button { font-family: 'IBM Plex Sans', sans-serif; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ── CONSTANTS ──────────────────────────────────────────────────────────────
+const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
+  "role": "requester",
+  "showApprovalChain": true,
+  "accentColor": "#0176D3",
+  "defaultClass": "OFFICIAL"
+}/*EDITMODE-END*/;
+
+const ROLES = { requester: 'Requester', approver: 'Approver / Owner', admin: 'Admin' };
+
+const MOCK_REQUESTS = [
+  { id: 'DOR-2024-0041', name: 'Medicare Claims Extract – QLD 2023', classification: 'SENSITIVE', status: 'pending', step: 'Data Owner Approval', requester: 'J. Nguyen', submitted: '2024-04-21', description: 'Linked Medicare claims dataset for research into hospital readmissions.', pii: true, dpia: 'required', retention: '7 years', encryption: 'AES-256', legalRef: 'Privacy Act 1988 s.95A', approvalChain: ['Data Owner', 'Legal Review', 'DPIA Officer', 'Data Custodian', 'CISO'], completedSteps: ['Data Owner'], urgency: 'standard' },
+  { id: 'DOR-2024-0039', name: 'Public Tender Register FY24', classification: 'OFFICIAL', status: 'pending', step: 'Parallel Approval', requester: 'S. Patel', submitted: '2024-04-20', description: 'Published tender register data for procurement analytics dashboard.', pii: false, dpia: 'not-required', retention: '5 years', encryption: 'TLS in transit', legalRef: null, approvalChain: ['Data Owner', 'Data Custodian'], completedSteps: [], urgency: 'low' },
+  { id: 'DOR-2024-0038', name: 'HR Staff Directory Snapshot', classification: 'SENSITIVE', status: 'pending', step: 'Legal Review', requester: 'M. Chen', submitted: '2024-04-18', description: 'HR staff directory for org-chart tooling integration.', pii: true, dpia: 'required', retention: '3 years', encryption: 'AES-256', legalRef: 'Privacy Act 1988 s.6', approvalChain: ['Data Owner', 'Legal Review', 'DPIA Officer', 'Data Custodian', 'CISO'], completedSteps: ['Data Owner', 'Legal Review'], urgency: 'high' },
+  { id: 'DOR-2024-0035', name: 'Budget Allocations FY23-24', classification: 'OFFICIAL', status: 'approved', step: 'Complete', requester: 'R. Williams', submitted: '2024-04-10', description: 'Departmental budget allocation data for finance reporting.', pii: false, dpia: 'not-required', retention: '7 years', encryption: 'TLS in transit', legalRef: null, approvalChain: ['Data Owner', 'Data Custodian'], completedSteps: ['Data Owner', 'Data Custodian'], urgency: 'low' },
+];
+
+// ── UTILITY COMPONENTS ─────────────────────────────────────────────────────
+const Badge = ({ type, children, size = 'md' }) => {
+  const styles = {
+    OFFICIAL: { background: '#D8EDFF', color: '#014486', border: '1px solid #9FD4FC' },
+    SENSITIVE: { background: '#FEF3E2', color: '#7A4504', border: '1px solid #FDD89B' },
+    pending: { background: '#F3F2F2', color: '#444', border: '1px solid #C9C7C5' },
+    approved: { background: '#EEF4EB', color: '#2E844A', border: '1px solid #A8D5B5' },
+    rejected: { background: '#FEF1EE', color: '#BA0517', border: '1px solid #F5B3A9' },
+    high: { background: '#FEF1EE', color: '#BA0517', border: '1px solid #F5B3A9' },
+    standard: { background: '#F3F2F2', color: '#444', border: '1px solid #C9C7C5' },
+    low: { background: '#EEF4EB', color: '#2E844A', border: '1px solid #A8D5B5' },
+  };
+  const s = styles[type] || styles[children] || styles.standard;
+  return (
+    <span style={{ ...s, padding: size === 'sm' ? '2px 8px' : '3px 10px', borderRadius: 12, fontSize: size === 'sm' ? 11 : 12, fontWeight: 600, letterSpacing: '0.03em', display: 'inline-block', whiteSpace: 'nowrap' }}>
+      {children}
+    </span>
+  );
+};
+
+const Card = ({ children, style = {}, onClick }) => (
+  <div onClick={onClick} style={{ background: '#fff', borderRadius: 8, boxShadow: '0 1px 3px rgba(0,0,0,.1)', border: '1px solid #E5E5E5', ...style }}>
+    {children}
+  </div>
+);
+
+const Btn = ({ variant = 'primary', children, onClick, disabled, style = {}, size = 'md', icon }) => {
+  const base = { display: 'inline-flex', alignItems: 'center', gap: 6, borderRadius: 4, fontWeight: 500, cursor: disabled ? 'not-allowed' : 'pointer', transition: 'all .15s', border: 'none', fontFamily: 'IBM Plex Sans, sans-serif', opacity: disabled ? 0.5 : 1 };
+  const sizes = { sm: { padding: '5px 12px', fontSize: 13 }, md: { padding: '8px 18px', fontSize: 14 }, lg: { padding: '11px 24px', fontSize: 15 } };
+  const variants = {
+    primary: { background: 'var(--blue)', color: '#fff' },
+    secondary: { background: '#fff', color: 'var(--blue)', border: '1px solid var(--blue)' },
+    danger: { background: 'var(--red)', color: '#fff' },
+    ghost: { background: 'transparent', color: 'var(--gray-5)', border: '1px solid var(--gray-3)' },
+    success: { background: 'var(--green)', color: '#fff' },
+  };
+  return (
+    <button disabled={disabled} onClick={onClick} style={{ ...base, ...sizes[size], ...variants[variant], ...style }}>
+      {icon && <span style={{ fontSize: 16 }}>{icon}</span>}{children}
+    </button>
+  );
+};
+
+const FieldLabel = ({ children, required }) => (
+  <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#444', marginBottom: 5 }}>
+    {children}{required && <span style={{ color: 'var(--red)', marginLeft: 3 }}>*</span>}
+  </label>
+);
+
+const Input = ({ value, onChange, placeholder, type = 'text', rows, disabled, style = {} }) => {
+  const base = { width: '100%', padding: '8px 12px', border: '1px solid var(--gray-3)', borderRadius: 4, fontSize: 14, color: 'var(--navy)', background: disabled ? '#F9F9F9' : '#fff', outline: 'none', transition: 'border .15s', ...style };
+  return rows
+    ? <textarea value={value} onChange={onChange} placeholder={placeholder} rows={rows} disabled={disabled} style={{ ...base, resize: 'vertical', lineHeight: 1.5 }} />
+    : <input type={type} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} style={base} />;
+};
+
+const Select = ({ value, onChange, options, disabled }) => (
+  <select value={value} onChange={onChange} disabled={disabled} style={{ width: '100%', padding: '8px 12px', border: '1px solid var(--gray-3)', borderRadius: 4, fontSize: 14, color: 'var(--navy)', background: disabled ? '#F9F9F9' : '#fff', outline: 'none' }}>
+    {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+  </select>
+);
+
+const Toggle = ({ checked, onChange, label }) => (
+  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+    <div onClick={() => onChange(!checked)} style={{ width: 36, height: 20, borderRadius: 10, background: checked ? 'var(--blue)' : 'var(--gray-4)', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+      <div style={{ width: 16, height: 16, borderRadius: '50%', background: '#fff', position: 'absolute', top: 2, left: checked ? 18 : 2, transition: 'left .2s', boxShadow: '0 1px 3px rgba(0,0,0,.2)' }} />
+    </div>
+    {label && <span style={{ fontSize: 14, color: 'var(--gray-6)' }}>{label}</span>}
+  </label>
+);
+
+const Checkbox = ({ checked, onChange, label, sublabel }) => (
+  <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', userSelect: 'none' }}>
+    <div onClick={() => onChange(!checked)} style={{ width: 16, height: 16, borderRadius: 3, border: `2px solid ${checked ? 'var(--blue)' : 'var(--gray-4)'}`, background: checked ? 'var(--blue)' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 2, transition: 'all .15s' }}>
+      {checked && <span style={{ color: '#fff', fontSize: 10, fontWeight: 700 }}>✓</span>}
+    </div>
+    <div>
+      <div style={{ fontSize: 14, color: 'var(--gray-6)' }}>{label}</div>
+      {sublabel && <div style={{ fontSize: 12, color: 'var(--gray-5)', marginTop: 1 }}>{sublabel}</div>}
+    </div>
+  </label>
+);
+
+const InfoBox = ({ type = 'info', children }) => {
+  const map = { info: { bg: '#E8F4FC', border: '#9FD4FC', icon: 'ℹ', color: '#014486' }, warning: { bg: '#FEF3E2', border: '#FDD89B', icon: '⚠', color: '#7A4504' }, success: { bg: '#EEF4EB', border: '#A8D5B5', icon: '✓', color: '#2E844A' }, error: { bg: '#FEF1EE', border: '#F5B3A9', icon: '✕', color: '#BA0517' } };
+  const m = map[type];
+  return (
+    <div style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 6, padding: '10px 14px', display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+      <span style={{ fontSize: 14, color: m.color, fontWeight: 700, flexShrink: 0 }}>{m.icon}</span>
+      <div style={{ fontSize: 13, color: m.color, lineHeight: 1.5 }}>{children}</div>
+    </div>
+  );
+};
+
+// ── APPROVAL CHAIN VISUALIZER ──────────────────────────────────────────────
+const ApprovalChain = ({ steps, completed = [], current, classification }) => {
+  const isSensitive = classification === 'SENSITIVE';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
+      {isSensitive ? (
+        // Sequential chain for SENSITIVE
+        steps.map((step, i) => {
+          const done = completed.includes(step);
+          const active = !done && (completed.length === i);
+          return (
+            <div key={step} style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, flexShrink: 0, border: done ? 'none' : active ? '2px solid var(--blue)' : '2px solid var(--gray-3)', background: done ? 'var(--green)' : active ? 'var(--blue-light)' : '#fff', color: done ? '#fff' : active ? 'var(--blue)' : 'var(--gray-5)' }}>
+                  {done ? '✓' : i + 1}
+                </div>
+                {i < steps.length - 1 && <div style={{ width: 2, height: 24, background: done ? 'var(--green)' : 'var(--gray-3)', margin: '2px 0' }} />}
+              </div>
+              <div style={{ paddingTop: 4, paddingBottom: 18 }}>
+                <div style={{ fontSize: 13, fontWeight: active ? 600 : 500, color: done ? 'var(--green)' : active ? 'var(--blue)' : 'var(--gray-5)' }}>{step}</div>
+                {active && <div style={{ fontSize: 11, color: 'var(--blue)', marginTop: 2 }}>Awaiting approval</div>}
+                {done && <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 2 }}>Approved</div>}
+              </div>
+            </div>
+          );
+        })
+      ) : (
+        // Parallel for OFFICIAL
+        <div>
+          <div style={{ fontSize: 12, color: 'var(--gray-5)', marginBottom: 10, fontWeight: 500 }}>PARALLEL — all approvers notified simultaneously</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            {steps.map(step => {
+              const done = completed.includes(step);
+              return (
+                <div key={step} style={{ flex: 1, background: done ? 'var(--green-bg)' : 'var(--blue-light)', border: `1px solid ${done ? '#A8D5B5' : '#9FD4FC'}`, borderRadius: 6, padding: '10px 12px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 20, marginBottom: 4 }}>{done ? '✓' : '⏳'}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: done ? 'var(--green)' : 'var(--navy-mid)' }}>{step}</div>
+                  <div style={{ fontSize: 11, color: done ? 'var(--green)' : 'var(--blue)', marginTop: 3 }}>{done ? 'Approved' : 'Pending'}</div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ── STEPPER ────────────────────────────────────────────────────────────────
+const OFFICIAL_STEPS = ['Metadata', 'Classification', 'PII Check', 'Legal Review', 'Ingestion Config', 'Review & Submit'];
+const SENSITIVE_STEPS = ['Metadata', 'Classification', 'PII & Privacy', 'Legal Review', 'DPIA', 'Security Controls', 'Ingestion Config', 'Review & Submit'];
+
+const Stepper = ({ steps, current }) => (
+  <div style={{ display: 'flex', alignItems: 'center', gap: 0, marginBottom: 28 }}>
+    {steps.map((s, i) => {
+      const done = i < current;
+      const active = i === current;
+      return (
+        <React.Fragment key={s}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
+            <div style={{ width: 28, height: 28, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, background: done ? 'var(--blue)' : active ? 'var(--blue)' : '#fff', border: `2px solid ${done || active ? 'var(--blue)' : 'var(--gray-3)'}`, color: done || active ? '#fff' : 'var(--gray-5)', flexShrink: 0, transition: 'all .2s' }}>
+              {done ? '✓' : i + 1}
+            </div>
+            <div style={{ fontSize: 11, marginTop: 4, color: active ? 'var(--blue)' : done ? 'var(--gray-5)' : 'var(--gray-4)', fontWeight: active ? 600 : 400, whiteSpace: 'nowrap', textAlign: 'center', maxWidth: 72 }}>{s}</div>
+          </div>
+          {i < steps.length - 1 && <div style={{ flex: 1, height: 2, background: done ? 'var(--blue)' : 'var(--gray-3)', marginBottom: 18, minWidth: 8 }} />}
+        </React.Fragment>
+      );
+    })}
+  </div>
+);
+
+// ── STEP COMPONENTS ────────────────────────────────────────────────────────
+const MetadataStep = ({ data, onChange }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div>
+      <FieldLabel required>Dataset Name</FieldLabel>
+      <Input value={data.name} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Medicare Claims Extract – QLD 2023" />
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div>
+        <FieldLabel required>Owning Agency / Division</FieldLabel>
+        <Input value={data.agency} onChange={e => onChange('agency', e.target.value)} placeholder="e.g. Dept. of Health" />
+      </div>
+      <div>
+        <FieldLabel required>Data Owner</FieldLabel>
+        <Input value={data.owner} onChange={e => onChange('owner', e.target.value)} placeholder="Full name & email" />
+      </div>
+    </div>
+    <div>
+      <FieldLabel required>Dataset Description</FieldLabel>
+      <Input value={data.description} onChange={e => onChange('description', e.target.value)} placeholder="Describe the contents, source system and intended use for prototyping…" rows={3} />
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div>
+        <FieldLabel required>Source System</FieldLabel>
+        <Select value={data.sourceSystem} onChange={e => onChange('sourceSystem', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'sql', label: 'SQL Database' }, { value: 's3', label: 'S3 / Object Storage' }, { value: 'api', label: 'REST API' }, { value: 'sftp', label: 'SFTP' }, { value: 'manual', label: 'Manual Upload' }]} />
+      </div>
+      <div>
+        <FieldLabel required>Estimated Record Count</FieldLabel>
+        <Select value={data.recordCount} onChange={e => onChange('recordCount', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: '<10k', label: '< 10,000' }, { value: '10k-100k', label: '10K – 100K' }, { value: '100k-1m', label: '100K – 1M' }, { value: '>1m', label: '> 1M' }]} />
+      </div>
+    </div>
+    <div>
+      <FieldLabel>Jira / ServiceNow Ticket Reference</FieldLabel>
+      <Input value={data.ticketRef} onChange={e => onChange('ticketRef', e.target.value)} placeholder="e.g. DATA-1042 or CHG0012345" />
+    </div>
+    <div>
+      <FieldLabel>Business Justification for Prototyping</FieldLabel>
+      <Input value={data.justification} onChange={e => onChange('justification', e.target.value)} placeholder="Why is this dataset required for prototyping? What problem does it solve?" rows={2} />
+    </div>
+  </div>
+);
+
+const ClassificationStep = ({ data, onChange }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <InfoBox type="info">Select the highest applicable classification. If uncertain, apply the higher tier. Classification determines the approval path and security controls required.</InfoBox>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      {[
+        { value: 'OFFICIAL', title: 'OFFICIAL', description: 'General government business. Non-sensitive information that does not warrant additional protection beyond standard controls. Parallel approval workflow.', icon: '📋', controls: 'Standard — TLS in transit, role-based access', approvals: 'Data Owner + Data Custodian (parallel)' },
+        { value: 'SENSITIVE', title: 'SENSITIVE', description: 'Information where compromise could have adverse impacts. Includes personal information, legally privileged, commercial-in-confidence, or security-related data. Sequential approval chain.', icon: '🔒', controls: 'Enhanced — AES-256, DLP monitoring, access logs', approvals: 'Data Owner → Legal → DPIA → Custodian → CISO (sequential)', highlight: true },
+      ].map(opt => (
+        <div key={opt.value} onClick={() => onChange('classification', opt.value)} style={{ border: `2px solid ${data.classification === opt.value ? (opt.value === 'SENSITIVE' ? 'var(--amber)' : 'var(--blue)') : 'var(--gray-3)'}`, borderRadius: 8, padding: 18, cursor: 'pointer', transition: 'all .15s', background: data.classification === opt.value ? (opt.value === 'SENSITIVE' ? 'var(--amber-bg)' : 'var(--blue-light)') : '#fff' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+            <div style={{ fontSize: 24 }}>{opt.icon}</div>
+            <Badge type={opt.value}>{opt.value}</Badge>
+            {data.classification === opt.value && <span style={{ marginLeft: 'auto', fontSize: 16, color: opt.value === 'SENSITIVE' ? 'var(--amber)' : 'var(--blue)' }}>✓</span>}
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--gray-6)', lineHeight: 1.5, marginBottom: 12 }}>{opt.description}</p>
+          <div style={{ borderTop: '1px solid var(--gray-2)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ fontSize: 12 }}><span style={{ fontWeight: 600, color: 'var(--gray-5)' }}>Controls:</span> <span style={{ color: 'var(--gray-6)' }}>{opt.controls}</span></div>
+            <div style={{ fontSize: 12 }}><span style={{ fontWeight: 600, color: 'var(--gray-5)' }}>Approvals:</span> <span style={{ color: 'var(--gray-6)' }}>{opt.approvals}</span></div>
+          </div>
+        </div>
+      ))}
+    </div>
+    {data.classification === 'SENSITIVE' && (
+      <InfoBox type="warning">
+        <strong>SENSITIVE path selected.</strong> This requires a 5-step sequential approval chain including Legal Review, DPIA assessment, and CISO sign-off. Additional steps for data retention policy and encryption requirements will be presented.
+      </InfoBox>
+    )}
+    {data.classification === 'OFFICIAL' && (
+      <InfoBox type="success">
+        <strong>OFFICIAL path selected.</strong> Parallel approval from Data Owner and Data Custodian. Estimated approval time: 2–3 business days.
+      </InfoBox>
+    )}
+  </div>
+);
+
+const PiiStep = ({ data, onChange, isSensitive }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    {isSensitive && <InfoBox type="warning">SENSITIVE classification: complete all PII and privacy fields below. A DPIA will be required if PII is confirmed.</InfoBox>}
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>PII Identification</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Toggle checked={data.containsPii} onChange={v => onChange('containsPii', v)} label="This dataset contains Personally Identifiable Information (PII)" />
+        {data.containsPii && (
+          <div style={{ paddingLeft: 46, display: 'flex', flexDirection: 'column', gap: 10, borderLeft: '3px solid var(--amber-border)', marginLeft: 7 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--gray-6)', marginBottom: 4 }}>Which PII categories are present?</div>
+            {[['names', 'Full names or partial names'], ['dob', 'Date of birth'], ['addresses', 'Physical / postal addresses'], ['identifiers', 'Government identifiers (TFN, Medicare no., etc.)'], ['health', 'Health or medical information'], ['financial', 'Financial account details'], ['location', 'Precise location data'], ['biometric', 'Biometric data']].map(([k, label]) => (
+              <Checkbox key={k} checked={data.piiCategories?.[k]} onChange={v => onChange('piiCategories', { ...data.piiCategories, [k]: v })} label={label} />
+            ))}
+          </div>
+        )}
+      </div>
+    </Card>
+    {isSensitive && (
+      <Card style={{ padding: 18 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Privacy Assessment</div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <FieldLabel required>Applicable Privacy Act provisions</FieldLabel>
+            <Input value={data.privacyProvisions} onChange={e => onChange('privacyProvisions', e.target.value)} placeholder="e.g. Privacy Act 1988 s.95A, APPs 3, 6, 11" />
+          </div>
+          <div>
+            <FieldLabel required>De-identification approach</FieldLabel>
+            <Select value={data.deidentApproach} onChange={e => onChange('deidentApproach', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'none', label: 'No de-identification (justify below)' }, { value: 'pseudonymise', label: 'Pseudonymisation' }, { value: 'aggregate', label: 'Aggregation / statistical suppression' }, { value: 'k-anon', label: 'k-Anonymisation' }, { value: 'synthetic', label: 'Replace with synthetic data' }]} />
+          </div>
+          <div>
+            <FieldLabel>Justification / notes</FieldLabel>
+            <Input value={data.privacyNotes} onChange={e => onChange('privacyNotes', e.target.value)} rows={2} placeholder="Additional context for the privacy review…" />
+          </div>
+        </div>
+      </Card>
+    )}
+    {!isSensitive && (
+      <div>
+        <FieldLabel>Additional Notes</FieldLabel>
+        <Input value={data.piiNotes} onChange={e => onChange('piiNotes', e.target.value)} rows={2} placeholder="Any additional context about data contents…" />
+      </div>
+    )}
+  </div>
+);
+
+const LegalStep = ({ data, onChange, isSensitive }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    {isSensitive && <InfoBox type="warning">Legal sign-off is required for SENSITIVE data. Legal counsel must review before the approval chain proceeds to the DPIA Officer.</InfoBox>}
+    <div>
+      <FieldLabel required>Data Sharing Authority / Legal Basis</FieldLabel>
+      <Input value={data.legalBasis} onChange={e => onChange('legalBasis', e.target.value)} placeholder="e.g. Memorandum of Understanding, Data Sharing Agreement, Privacy Act s.95A authorisation" />
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div>
+        <FieldLabel>Data Sharing Agreement Reference</FieldLabel>
+        <Input value={data.dsaRef} onChange={e => onChange('dsaRef', e.target.value)} placeholder="DSA / MOU number or reference" />
+      </div>
+      <div>
+        <FieldLabel>Agreement Expiry Date</FieldLabel>
+        <Input type="date" value={data.dsaExpiry} onChange={e => onChange('dsaExpiry', e.target.value)} />
+      </div>
+    </div>
+    <div>
+      <FieldLabel required>Data Retention Period</FieldLabel>
+      <Select value={data.retention} onChange={e => onChange('retention', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: '30d', label: '30 days (prototype only)' }, { value: '90d', label: '90 days' }, { value: '1y', label: '1 year' }, { value: '3y', label: '3 years' }, { value: '5y', label: '5 years' }, { value: '7y', label: '7 years (standard gov)' }, { value: 'custom', label: 'Custom (specify below)' }]} />
+    </div>
+    <div>
+      <FieldLabel required>Disposal / Deletion Method</FieldLabel>
+      <Select value={data.disposal} onChange={e => onChange('disposal', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'auto-delete', label: 'Automated deletion at end of retention period' }, { value: 'manual-review', label: 'Manual review then delete' }, { value: 'archive', label: 'Archive to long-term storage' }, { value: 'national-archives', label: 'Transfer to National Archives' }]} />
+    </div>
+    {isSensitive && (
+      <div>
+        <FieldLabel required>Legal Counsel Assigned</FieldLabel>
+        <Input value={data.legalCounsel} onChange={e => onChange('legalCounsel', e.target.value)} placeholder="Name and email of legal reviewer" />
+      </div>
+    )}
+    <div>
+      <FieldLabel>Additional Legal Notes</FieldLabel>
+      <Input value={data.legalNotes} onChange={e => onChange('legalNotes', e.target.value)} rows={2} placeholder="Any restrictions, caveats, or conditions imposed by the legal framework…" />
+    </div>
+  </div>
+);
+
+const DpiaStep = ({ data, onChange }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <InfoBox type="warning">A Data Protection Impact Assessment (DPIA) is mandatory for SENSITIVE data containing PII. Complete all fields before submission.</InfoBox>
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>DPIA Scoping</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div>
+          <FieldLabel required>Nature and purpose of processing</FieldLabel>
+          <Input value={data.dpiaPurpose} onChange={e => onChange('dpiaPurpose', e.target.value)} rows={2} placeholder="Describe what will be done with the data and why…" />
+        </div>
+        <div>
+          <FieldLabel required>Necessity and proportionality assessment</FieldLabel>
+          <Select value={data.dpiaProportional} onChange={e => onChange('dpiaProportional', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'proportional', label: 'Confirmed proportional — minimum data required' }, { value: 'review', label: 'Requires further review to confirm minimum data set' }, { value: 'disproportional', label: 'Potentially disproportional — requires justification' }]} />
+        </div>
+        <div>
+          <FieldLabel required>Risks identified</FieldLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
+            {[['reIdentification', 'Re-identification risk from combination with other datasets'], ['unauthorisedAccess', 'Unauthorised access or insider threat'], ['dataLoss', 'Data loss or breach during transfer'], ['purposeCreep', 'Purpose creep beyond approved use'], ['thirdParty', 'Third-party data sharing risk']].map(([k, label]) => (
+              <Checkbox key={k} checked={data.dpiaRisks?.[k]} onChange={v => onChange('dpiaRisks', { ...data.dpiaRisks, [k]: v })} label={label} />
+            ))}
+          </div>
+        </div>
+        <div>
+          <FieldLabel required>Mitigation measures</FieldLabel>
+          <Input value={data.dpiaMitigations} onChange={e => onChange('dpiaMitigations', e.target.value)} rows={2} placeholder="Describe controls to address identified risks…" />
+        </div>
+      </div>
+    </Card>
+    <div>
+      <FieldLabel required>DPIA Officer Assigned</FieldLabel>
+      <Input value={data.dpiaOfficer} onChange={e => onChange('dpiaOfficer', e.target.value)} placeholder="Name and email of DPIA Officer" />
+    </div>
+  </div>
+);
+
+const SecurityStep = ({ data, onChange }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <InfoBox type="warning">SENSITIVE data requires enhanced security controls. All mandatory controls must be confirmed before submission.</InfoBox>
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>Encryption Requirements</div>
+      <div style={{ fontSize: 12, color: 'var(--gray-5)', marginBottom: 14 }}>Mandatory for SENSITIVE classification</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <FieldLabel required>Encryption at rest</FieldLabel>
+          <Select value={data.encryptionAtRest} onChange={e => onChange('encryptionAtRest', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'aes256', label: 'AES-256 (required for SENSITIVE)' }, { value: 'aes128', label: 'AES-128' }, { value: 'none', label: 'Not encrypted (requires CISO waiver)' }]} />
+        </div>
+        <div>
+          <FieldLabel required>Encryption in transit</FieldLabel>
+          <Select value={data.encryptionInTransit} onChange={e => onChange('encryptionInTransit', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'tls13', label: 'TLS 1.3' }, { value: 'tls12', label: 'TLS 1.2 minimum' }, { value: 'sftp', label: 'SFTP / SCP' }]} />
+        </div>
+        <div>
+          <FieldLabel required>Key management</FieldLabel>
+          <Select value={data.keyManagement} onChange={e => onChange('keyManagement', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'aws-kms', label: 'AWS KMS' }, { value: 'azure-kv', label: 'Azure Key Vault' }, { value: 'agency-hsm', label: 'Agency-managed HSM' }, { value: 'manual', label: 'Manual key management' }]} />
+        </div>
+      </div>
+    </Card>
+    <Card style={{ padding: 18 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 14 }}>Access Controls</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <FieldLabel required>Access control model</FieldLabel>
+          <Select value={data.accessControl} onChange={e => onChange('accessControl', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'rbac', label: 'Role-Based Access Control (RBAC)' }, { value: 'abac', label: 'Attribute-Based Access Control (ABAC)' }, { value: 'need-to-know', label: 'Need-to-know list (named individuals)' }]} />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {[['mfa', 'Multi-factor authentication enforced', true], ['dlp', 'DLP monitoring enabled', true], ['auditLog', 'Comprehensive audit logging enabled', true], ['networkSeg', 'Network segmentation / isolated environment', false]].map(([k, label, required]) => (
+            <Checkbox key={k} checked={data.securityControls?.[k]} onChange={v => onChange('securityControls', { ...data.securityControls, [k]: v })} label={label} sublabel={required ? 'Mandatory for SENSITIVE' : 'Recommended'} />
+          ))}
+        </div>
+      </div>
+    </Card>
+  </div>
+);
+
+const IngestionStep = ({ data, onChange }) => (
+  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div>
+        <FieldLabel required>Target Environment</FieldLabel>
+        <Select value={data.targetEnv} onChange={e => onChange('targetEnv', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'dev', label: 'Development' }, { value: 'sandbox', label: 'Sandbox / Prototype' }, { value: 'staging', label: 'Staging' }, { value: 'prod', label: 'Production' }]} />
+      </div>
+      <div>
+        <FieldLabel required>Data Format</FieldLabel>
+        <Select value={data.dataFormat} onChange={e => onChange('dataFormat', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'csv', label: 'CSV' }, { value: 'json', label: 'JSON' }, { value: 'parquet', label: 'Parquet' }, { value: 'sql-dump', label: 'SQL Dump' }, { value: 'xml', label: 'XML' }, { value: 'api', label: 'API / Live feed' }]} />
+      </div>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div>
+        <FieldLabel required>Ingestion Method</FieldLabel>
+        <Select value={data.ingestionMethod} onChange={e => onChange('ingestionMethod', e.target.value)} options={[{ value: '', label: 'Select…' }, { value: 'batch', label: 'Batch / one-time extract' }, { value: 'scheduled', label: 'Scheduled pipeline' }, { value: 'streaming', label: 'Streaming / real-time' }, { value: 'manual', label: 'Manual file transfer' }]} />
+      </div>
+      <div>
+        <FieldLabel>Refresh Frequency</FieldLabel>
+        <Select value={data.refreshFreq} onChange={e => onChange('refreshFreq', e.target.value)} options={[{ value: 'once', label: 'One-time only' }, { value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'monthly', label: 'Monthly' }, { value: 'realtime', label: 'Real-time' }]} />
+      </div>
+    </div>
+    <div>
+      <FieldLabel>Access Restrictions / Conditions of Use</FieldLabel>
+      <Input value={data.accessRestrictions} onChange={e => onChange('accessRestrictions', e.target.value)} rows={2} placeholder="Any limitations on who can access, query, or export this data in the target environment…" />
+    </div>
+    <div>
+      <FieldLabel>ServiceNow Change Request</FieldLabel>
+      <Input value={data.changeRef} onChange={e => onChange('changeRef', e.target.value)} placeholder="e.g. CHG0012345" />
+    </div>
+    <div>
+      <FieldLabel>Technical Contact</FieldLabel>
+      <Input value={data.techContact} onChange={e => onChange('techContact', e.target.value)} placeholder="Name and email of data engineer responsible for ingestion" />
+    </div>
+  </div>
+);
+
+const ReviewStep = ({ formData, classification, steps }) => {
+  const chain = classification === 'SENSITIVE'
+    ? ['Data Owner', 'Legal Review', 'DPIA Officer', 'Data Custodian', 'CISO']
+    : ['Data Owner', 'Data Custodian'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <InfoBox type="info">Review your submission below. Once submitted, approvers will be notified and cannot be changed.</InfoBox>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <Card style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Dataset</div>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{formData.metadata.name || '—'}</div>
+          <div style={{ fontSize: 13, color: 'var(--gray-5)' }}>{formData.metadata.agency || '—'}</div>
+          <div style={{ marginTop: 10 }}><Badge type={classification}>{classification}</Badge></div>
+        </Card>
+        <Card style={{ padding: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Approval Path</div>
+          <ApprovalChain steps={chain} completed={[]} classification={classification} />
+        </Card>
+      </div>
+      <Card style={{ padding: 16 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 12 }}>Summary</div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 24px' }}>
+          {[
+            ['Source System', formData.metadata.sourceSystem], ['Record Count', formData.metadata.recordCount],
+            ['Contains PII', formData.pii.containsPii ? 'Yes' : 'No'], ['De-identification', formData.pii.deidentApproach || '—'],
+            ['Legal Basis', formData.legal.legalBasis], ['Retention', formData.legal.retention],
+            ['Target Env', formData.ingestion.targetEnv], ['Ingestion Method', formData.ingestion.ingestionMethod],
+          ].map(([k, v]) => (
+            <div key={k}>
+              <span style={{ fontSize: 12, color: 'var(--gray-5)', fontWeight: 600 }}>{k}:</span>
+              <span style={{ fontSize: 13, color: 'var(--gray-6)', marginLeft: 6 }}>{v || '—'}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+      {classification === 'SENSITIVE' && (
+        <InfoBox type="warning">This SENSITIVE request will follow a <strong>sequential 5-step approval chain</strong>. Each approver must sign off before the next is notified. Estimated total review time: 5–10 business days.</InfoBox>
+      )}
+    </div>
+  );
+};
+
+// ── REQUESTER VIEW ─────────────────────────────────────────────────────────
+const RequesterView = () => {
+  const [step, setStep] = useState(0);
+  const [submitted, setSubmitted] = useState(false);
+  const [refId, setRefId] = useState('');
+  const [formData, setFormData] = useState({
+    metadata: { name: '', agency: '', owner: '', description: '', sourceSystem: '', recordCount: '', ticketRef: '', justification: '' },
+    classification: 'OFFICIAL',
+    pii: { containsPii: false, piiCategories: {}, privacyProvisions: '', deidentApproach: '', privacyNotes: '', piiNotes: '' },
+    legal: { legalBasis: '', dsaRef: '', dsaExpiry: '', retention: '', disposal: '', legalCounsel: '', legalNotes: '' },
+    dpia: { dpiaPurpose: '', dpiaProportional: '', dpiaRisks: {}, dpiaMitigations: '', dpiaOfficer: '' },
+    security: { encryptionAtRest: '', encryptionInTransit: '', keyManagement: '', accessControl: '', securityControls: {} },
+    ingestion: { targetEnv: '', dataFormat: '', ingestionMethod: '', refreshFreq: 'once', accessRestrictions: '', changeRef: '', techContact: '' },
+  });
+
+  const isSensitive = formData.classification === 'SENSITIVE';
+  const steps = isSensitive ? SENSITIVE_STEPS : OFFICIAL_STEPS;
+  const totalSteps = steps.length;
+
+  const updateField = (section, key, value) => setFormData(prev => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+
+  const stepContent = () => {
+    if (!isSensitive) {
+      // OFFICIAL: Metadata(0), Classification(1), PII(2), Legal(3), Ingestion(4), Review(5)
+      const map = [
+        <MetadataStep data={formData.metadata} onChange={(k, v) => updateField('metadata', k, v)} />,
+        <ClassificationStep data={{ classification: formData.classification }} onChange={(_, v) => setFormData(p => ({ ...p, classification: v }))} />,
+        <PiiStep data={formData.pii} onChange={(k, v) => updateField('pii', k, v)} isSensitive={false} />,
+        <LegalStep data={formData.legal} onChange={(k, v) => updateField('legal', k, v)} isSensitive={false} />,
+        <IngestionStep data={formData.ingestion} onChange={(k, v) => updateField('ingestion', k, v)} />,
+        <ReviewStep formData={formData} classification={formData.classification} steps={steps} />,
+      ];
+      return map[step];
+    } else {
+      // SENSITIVE: Metadata(0), Classification(1), PII(2), Legal(3), DPIA(4), Security(5), Ingestion(6), Review(7)
+      const map = [
+        <MetadataStep data={formData.metadata} onChange={(k, v) => updateField('metadata', k, v)} />,
+        <ClassificationStep data={{ classification: formData.classification }} onChange={(_, v) => setFormData(p => ({ ...p, classification: v }))} />,
+        <PiiStep data={formData.pii} onChange={(k, v) => updateField('pii', k, v)} isSensitive={true} />,
+        <LegalStep data={formData.legal} onChange={(k, v) => updateField('legal', k, v)} isSensitive={true} />,
+        <DpiaStep data={formData.dpia} onChange={(k, v) => updateField('dpia', k, v)} />,
+        <SecurityStep data={formData.security} onChange={(k, v) => updateField('security', k, v)} />,
+        <IngestionStep data={formData.ingestion} onChange={(k, v) => updateField('ingestion', k, v)} />,
+        <ReviewStep formData={formData} classification={formData.classification} steps={steps} />,
+      ];
+      return map[Math.min(step, map.length - 1)];
+    }
+  };
+
+  const handleSubmit = () => {
+    const id = `DOR-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+    setRefId(id);
+    setSubmitted(true);
+  };
+
+  if (submitted) {
+    const chain = isSensitive ? ['Data Owner', 'Legal Review', 'DPIA Officer', 'Data Custodian', 'CISO'] : ['Data Owner', 'Data Custodian'];
+    return (
+      <div style={{ maxWidth: 660, margin: '0 auto', paddingTop: 20, paddingBottom: 40 }}>
+        <Card style={{ padding: 36, textAlign: 'center', marginBottom: 20 }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--green-bg)', border: '2px solid var(--green)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 24 }}>✓</div>
+          <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Request Submitted</div>
+          <div style={{ fontSize: 14, color: 'var(--gray-5)', marginBottom: 16 }}>Your data onboarding request has been lodged and approvers have been notified.</div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, background: 'var(--gray-1)', borderRadius: 6, padding: '8px 18px', marginBottom: 6 }}>
+            <span style={{ fontSize: 12, color: 'var(--gray-5)' }}>Reference</span>
+            <span style={{ fontFamily: 'IBM Plex Mono, monospace', fontWeight: 600, fontSize: 15, color: 'var(--navy)' }}>{refId}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 8, marginTop: 12 }}><Badge type={formData.classification}>{formData.classification}</Badge></div>
+        </Card>
+        <Card style={{ padding: 24 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 16 }}>Approval Workflow</div>
+          <ApprovalChain steps={chain} completed={[]} classification={formData.classification} />
+        </Card>
+        <div style={{ textAlign: 'center', marginTop: 20 }}>
+          <Btn variant="secondary" onClick={() => { setSubmitted(false); setStep(0); setFormData({ metadata: { name: '', agency: '', owner: '', description: '', sourceSystem: '', recordCount: '', ticketRef: '', justification: '' }, classification: 'OFFICIAL', pii: { containsPii: false, piiCategories: {}, privacyProvisions: '', deidentApproach: '', privacyNotes: '', piiNotes: '' }, legal: { legalBasis: '', dsaRef: '', dsaExpiry: '', retention: '', disposal: '', legalCounsel: '', legalNotes: '' }, dpia: { dpiaPurpose: '', dpiaProportional: '', dpiaRisks: {}, dpiaMitigations: '', dpiaOfficer: '' }, security: { encryptionAtRest: '', encryptionInTransit: '', keyManagement: '', accessControl: '', securityControls: {} }, ingestion: { targetEnv: '', dataFormat: '', ingestionMethod: '', refreshFreq: 'once', accessRestrictions: '', changeRef: '', techContact: '' } }); }}>Submit another request</Btn>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ maxWidth: 780, margin: '0 auto', paddingTop: 20, paddingBottom: 40 }}>
+      <div style={{ marginBottom: 20 }}>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>New Data Onboarding Request</div>
+        <div style={{ fontSize: 14, color: 'var(--gray-5)' }}>Complete all required fields. Classification determines the approval path and security controls.</div>
+      </div>
+      <Stepper steps={steps} current={step} />
+      <Card style={{ padding: 28, marginBottom: 20 }}>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{steps[step]}</div>
+        <div style={{ fontSize: 13, color: 'var(--gray-5)', marginBottom: 20 }}>Step {step + 1} of {totalSteps}</div>
+        {stepContent()}
+      </Card>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Btn variant="ghost" onClick={() => setStep(s => s - 1)} disabled={step === 0}>← Back</Btn>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {step < totalSteps - 1
+            ? <Btn variant="primary" onClick={() => { setStep(s => s + 1); if (step === 1 && formData.classification !== (isSensitive ? 'SENSITIVE' : 'OFFICIAL')) setStep(0); }}>Continue →</Btn>
+            : <Btn variant="success" onClick={handleSubmit}>Submit Request</Btn>
+          }
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── APPROVER VIEW ──────────────────────────────────────────────────────────
+const ApproverView = () => {
+  const [requests, setRequests] = useState(MOCK_REQUESTS);
+  const [selected, setSelected] = useState(null);
+  const [note, setNote] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [actionDone, setActionDone] = useState(null);
+
+  const filtered = requests.filter(r => filter === 'all' ? true : filter === 'pending' ? r.status === 'pending' : r.status === 'approved');
+  const selectedReq = requests.find(r => r.id === selected);
+
+  const handleAction = (id, action) => {
+    setRequests(prev => prev.map(r => r.id === id ? { ...r, status: action === 'approve' ? 'approved' : 'rejected' } : r));
+    setActionDone(action);
+    setTimeout(() => { setActionDone(null); setSelected(null); setNote(''); }, 1800);
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: selected ? '360px 1fr' : '1fr', gap: 16, paddingTop: 4, paddingBottom: 40, maxWidth: 1100 }}>
+      {/* List */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ fontSize: 18, fontWeight: 700 }}>Approval Queue</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {['all', 'pending', 'approved'].map(f => (
+              <button key={f} onClick={() => setFilter(f)} style={{ padding: '4px 12px', borderRadius: 4, fontSize: 12, fontWeight: 600, border: '1px solid', cursor: 'pointer', background: filter === f ? 'var(--blue)' : '#fff', color: filter === f ? '#fff' : 'var(--gray-5)', borderColor: filter === f ? 'var(--blue)' : 'var(--gray-3)', transition: 'all .15s', textTransform: 'capitalize' }}>{f}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtered.map(req => (
+            <Card key={req.id} onClick={() => setSelected(req.id === selected ? null : req.id)} style={{ padding: 16, cursor: 'pointer', border: `2px solid ${req.id === selected ? 'var(--blue)' : 'var(--gray-2)'}`, transition: 'border .15s' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  <Badge type={req.classification} size="sm">{req.classification}</Badge>
+                  <Badge type={req.urgency} size="sm">{req.urgency}</Badge>
+                </div>
+                <Badge type={req.status} size="sm">{req.status}</Badge>
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 3 }}>{req.name}</div>
+              <div style={{ display: 'flex', justify: 'space-between', gap: 12 }}>
+                <span style={{ fontSize: 12, color: 'var(--gray-5)', fontFamily: 'IBM Plex Mono, monospace' }}>{req.id}</span>
+                <span style={{ fontSize: 12, color: 'var(--gray-5)' }}>{req.requester} · {req.submitted}</span>
+              </div>
+              {req.status === 'pending' && (
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--blue)', background: 'var(--blue-light)', padding: '4px 8px', borderRadius: 4, display: 'inline-block' }}>⏳ {req.step}</div>
+              )}
+            </Card>
+          ))}
+        </div>
+      </div>
+
+      {/* Detail */}
+      {selectedReq && (
+        <Card style={{ padding: 24, alignSelf: 'flex-start', position: 'sticky', top: 16 }}>
+          {actionDone ? (
+            <div style={{ textAlign: 'center', padding: '40px 0' }}>
+              <div style={{ fontSize: 40, marginBottom: 12 }}>{actionDone === 'approve' ? '✅' : '❌'}</div>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{actionDone === 'approve' ? 'Approved' : 'Rejected'}</div>
+              <div style={{ fontSize: 13, color: 'var(--gray-5)', marginTop: 4 }}>Next approver in chain has been notified.</div>
+            </div>
+          ) : (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4 }}>{selectedReq.name}</div>
+                  <div style={{ fontSize: 12, fontFamily: 'IBM Plex Mono, monospace', color: 'var(--gray-5)' }}>{selectedReq.id}</div>
+                </div>
+                <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', fontSize: 18, color: 'var(--gray-5)', cursor: 'pointer' }}>✕</button>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
+                <Badge type={selectedReq.classification}>{selectedReq.classification}</Badge>
+                <Badge type={selectedReq.status}>{selectedReq.status}</Badge>
+              </div>
+              <p style={{ fontSize: 13, color: 'var(--gray-6)', lineHeight: 1.6, marginBottom: 18 }}>{selectedReq.description}</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 16px', marginBottom: 18 }}>
+                {[['Requester', selectedReq.requester], ['Submitted', selectedReq.submitted], ['PII', selectedReq.pii ? 'Yes' : 'No'], ['DPIA', selectedReq.dpia], ['Retention', selectedReq.retention], ['Encryption', selectedReq.encryption]].map(([k, v]) => (
+                  <div key={k}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>{k}</div>
+                    <div style={{ fontSize: 13, color: 'var(--gray-6)', marginTop: 2 }}>{v}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ borderTop: '1px solid var(--gray-2)', paddingTop: 16, marginBottom: 16 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 10 }}>Approval Chain</div>
+                <ApprovalChain steps={selectedReq.approvalChain} completed={selectedReq.completedSteps} classification={selectedReq.classification} />
+              </div>
+              {selectedReq.status === 'pending' && (
+                <div style={{ borderTop: '1px solid var(--gray-2)', paddingTop: 16 }}>
+                  <FieldLabel>Decision notes (optional)</FieldLabel>
+                  <Input value={note} onChange={e => setNote(e.target.value)} rows={2} placeholder="Add context for your decision…" style={{ marginBottom: 12 }} />
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <Btn variant="success" style={{ flex: 1 }} onClick={() => handleAction(selectedReq.id, 'approve')}>Approve</Btn>
+                    <Btn variant="danger" style={{ flex: 1 }} onClick={() => handleAction(selectedReq.id, 'reject')}>Reject</Btn>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+      )}
+    </div>
+  );
+};
+
+// ── ADMIN VIEW ─────────────────────────────────────────────────────────────
+const AdminView = () => {
+  const stats = [
+    { label: 'Total Requests', value: 47, sub: 'YTD 2024', color: 'var(--blue)' },
+    { label: 'Pending Approval', value: 8, sub: '3 SENSITIVE', color: 'var(--amber)' },
+    { label: 'Approved (30d)', value: 12, sub: 'Avg 4.2 days', color: 'var(--green)' },
+    { label: 'Avg Approval Time', value: '4.2d', sub: 'SENSITIVE: 8.1d', color: 'var(--navy-mid)' },
+  ];
+  return (
+    <div style={{ paddingTop: 4, paddingBottom: 40, maxWidth: 900 }}>
+      <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 20 }}>Admin Overview</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
+        {stats.map(s => (
+          <Card key={s.label} style={{ padding: 18 }}>
+            <div style={{ fontSize: 28, fontWeight: 700, color: s.color, marginBottom: 2 }}>{s.value}</div>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 2 }}>{s.label}</div>
+            <div style={{ fontSize: 12, color: 'var(--gray-5)' }}>{s.sub}</div>
+          </Card>
+        ))}
+      </div>
+      <Card style={{ padding: 0, overflow: 'hidden' }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--gray-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontWeight: 700, fontSize: 14 }}>All Requests</div>
+          <Btn size="sm" variant="secondary">Export CSV</Btn>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr style={{ background: 'var(--gray-1)' }}>
+            {['Reference', 'Dataset', 'Classification', 'Requester', 'Submitted', 'Status', 'Current Step'].map(h => (
+              <th key={h} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 12, fontWeight: 700, color: 'var(--gray-5)', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {MOCK_REQUESTS.map((r, i) => (
+              <tr key={r.id} style={{ borderTop: '1px solid var(--gray-2)', background: i % 2 === 0 ? '#fff' : 'var(--gray-1)' }}>
+                <td style={{ padding: '10px 16px', fontFamily: 'IBM Plex Mono, monospace', fontSize: 12, color: 'var(--blue)', whiteSpace: 'nowrap' }}>{r.id}</td>
+                <td style={{ padding: '10px 16px', fontSize: 13, fontWeight: 500, maxWidth: 200 }}>{r.name}</td>
+                <td style={{ padding: '10px 16px' }}><Badge type={r.classification} size="sm">{r.classification}</Badge></td>
+                <td style={{ padding: '10px 16px', fontSize: 13, color: 'var(--gray-6)', whiteSpace: 'nowrap' }}>{r.requester}</td>
+                <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--gray-5)', whiteSpace: 'nowrap' }}>{r.submitted}</td>
+                <td style={{ padding: '10px 16px' }}><Badge type={r.status} size="sm">{r.status}</Badge></td>
+                <td style={{ padding: '10px 16px', fontSize: 12, color: 'var(--gray-5)' }}>{r.step}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </div>
+  );
+};
+
+// ── SIDEBAR ────────────────────────────────────────────────────────────────
+const Sidebar = ({ role, setRole, activeView, setView }) => {
+  const links = {
+    requester: [{ id: 'new', label: 'New Request', icon: '＋' }, { id: 'my', label: 'My Requests', icon: '📄' }],
+    approver: [{ id: 'queue', label: 'Approval Queue', icon: '📋' }, { id: 'history', label: 'History', icon: '🕐' }],
+    admin: [{ id: 'overview', label: 'Overview', icon: '📊' }, { id: 'requests', label: 'All Requests', icon: '🗂' }, { id: 'settings', label: 'Settings', icon: '⚙' }],
+  };
+  return (
+    <div style={{ width: 220, background: 'var(--navy)', display: 'flex', flexDirection: 'column', flexShrink: 0 }}>
+      <div style={{ padding: '20px 16px 18px', borderBottom: '1px solid rgba(255,255,255,.1)' }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.4)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Data Portal</div>
+        <div style={{ fontSize: 15, fontWeight: 700, color: '#fff' }}>Onboarding Hub</div>
+      </div>
+      <div style={{ padding: '12px 8px 8px' }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.35)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: 8, marginBottom: 6 }}>Role</div>
+        {Object.entries(ROLES).map(([k, label]) => (
+          <button key={k} onClick={() => { setRole(k); setView(Object.keys(links[k])[0]); }} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 5, border: 'none', background: role === k ? 'rgba(255,255,255,.12)' : 'transparent', color: role === k ? '#fff' : 'rgba(255,255,255,.55)', cursor: 'pointer', fontSize: 13, fontWeight: role === k ? 600 : 400, marginBottom: 2, transition: 'all .15s', textAlign: 'left' }}>
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: role === k ? 'var(--blue)' : 'transparent', border: role === k ? 'none' : '1.5px solid rgba(255,255,255,.3)', flexShrink: 0 }} />{label}
+          </button>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.1)', padding: '12px 8px', marginTop: 4 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(255,255,255,.35)', textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: 8, marginBottom: 6 }}>Navigation</div>
+        {(links[role] || []).map(link => (
+          <button key={link.id} onClick={() => setView(link.id)} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '7px 10px', borderRadius: 5, border: 'none', background: activeView === link.id ? 'rgba(255,255,255,.15)' : 'transparent', color: activeView === link.id ? '#fff' : 'rgba(255,255,255,.55)', cursor: 'pointer', fontSize: 13, fontWeight: activeView === link.id ? 600 : 400, marginBottom: 2, transition: 'all .15s', textAlign: 'left' }}>
+            <span style={{ fontSize: 14 }}>{link.icon}</span>{link.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ marginTop: 'auto', padding: '12px 16px', borderTop: '1px solid rgba(255,255,255,.1)' }}>
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,.4)' }}>Signed in as</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'rgba(255,255,255,.8)', marginTop: 2 }}>J. Nguyen · DHS</div>
+      </div>
+    </div>
+  );
+};
+
+// ── TWEAKS PANEL ───────────────────────────────────────────────────────────
+const TweaksPanel = ({ show, tweaks, setTweaks }) => {
+  if (!show) return null;
+  return (
+    <div style={{ position: 'fixed', bottom: 20, right: 20, width: 240, background: '#fff', border: '1px solid var(--gray-3)', borderRadius: 8, boxShadow: '0 4px 20px rgba(0,0,0,.15)', zIndex: 1000, padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12, color: 'var(--navy)' }}>Tweaks</div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray-5)', marginBottom: 6 }}>Default Classification</div>
+          {['OFFICIAL', 'SENSITIVE'].map(c => (
+            <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer', fontSize: 13 }}>
+              <input type="radio" name="tw-class" checked={tweaks.defaultClass === c} onChange={() => { const t = { ...tweaks, defaultClass: c }; setTweaks(t); window.parent.postMessage({ type: '__edit_mode_set_keys', edits: t }, '*'); }} />
+              <Badge type={c} size="sm">{c}</Badge>
+            </label>
+          ))}
+        </div>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--gray-5)', marginBottom: 6 }}>Accent Color</div>
+          {[['#0176D3', 'Gov Blue'], ['#1D1D1B', 'Charcoal'], ['#1B6335', 'Forest']].map(([color, label]) => (
+            <label key={color} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, cursor: 'pointer', fontSize: 13 }}>
+              <input type="radio" name="tw-color" checked={tweaks.accentColor === color} onChange={() => { const t = { ...tweaks, accentColor: color }; setTweaks(t); document.documentElement.style.setProperty('--blue', color); window.parent.postMessage({ type: '__edit_mode_set_keys', edits: t }, '*'); }} />
+              <div style={{ width: 14, height: 14, borderRadius: '50%', background: color }} />
+              {label}
+            </label>
+          ))}
+        </div>
+        <Toggle checked={tweaks.showApprovalChain} onChange={v => { const t = { ...tweaks, showApprovalChain: v }; setTweaks(t); window.parent.postMessage({ type: '__edit_mode_set_keys', edits: t }, '*'); }} label="Show chain in sidebar" />
+      </div>
+    </div>
+  );
+};
+
+// ── APP ────────────────────────────────────────────────────────────────────
+const App = () => {
+  const [role, setRole] = useState('requester');
+  const [view, setView] = useState('new');
+  const [showTweaks, setShowTweaks] = useState(false);
+  const [tweaks, setTweaks] = useState(TWEAK_DEFAULTS);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('dop-role');
+    if (saved) setRole(saved);
+  }, []);
+  useEffect(() => { localStorage.setItem('dop-role', role); }, [role]);
+
+  useEffect(() => {
+    window.addEventListener('message', e => {
+      if (e.data?.type === '__activate_edit_mode') setShowTweaks(true);
+      if (e.data?.type === '__deactivate_edit_mode') setShowTweaks(false);
+    });
+    window.parent.postMessage({ type: '__edit_mode_available' }, '*');
+  }, []);
+
+  const mainContent = () => {
+    if (role === 'requester') return <RequesterView key="req" />;
+    if (role === 'approver') return <ApproverView key="app" />;
+    return <AdminView key="adm" />;
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
+      <Sidebar role={role} setRole={r => { setRole(r); setView(r === 'requester' ? 'new' : r === 'approver' ? 'queue' : 'overview'); }} activeView={view} setView={setView} />
+      <div style={{ flex: 1, overflow: 'auto', background: 'var(--gray-1)' }}>
+        {/* Top bar */}
+        <div style={{ background: '#fff', borderBottom: '1px solid var(--gray-2)', padding: '12px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', position: 'sticky', top: 0, zIndex: 10 }}>
+          <div style={{ display: 'flex', align: 'center', gap: 8, fontSize: 14, color: 'var(--gray-5)' }}>
+            <span style={{ color: 'var(--navy)', fontWeight: 600 }}>{ROLES[role]}</span>
+            <span>·</span>
+            <span>Data Onboarding Portal</span>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <div style={{ background: 'var(--green-bg)', border: '1px solid #A8D5B5', borderRadius: 12, padding: '2px 10px', fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>SYSTEM LIVE</div>
+          </div>
+        </div>
+        {/* Content */}
+        <div style={{ padding: '24px 28px' }}>
+          {mainContent()}
+        </div>
+      </div>
+      <TweaksPanel show={showTweaks} tweaks={tweaks} setTweaks={setTweaks} />
+    </div>
+  );
+};
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
